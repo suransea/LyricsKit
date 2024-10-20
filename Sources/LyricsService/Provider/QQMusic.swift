@@ -9,8 +9,6 @@
 
 import Foundation
 import LyricsCore
-import CXShim
-import CXExtensions
 
 #if canImport(FoundationNetworking)
 import FoundationNetworking
@@ -26,64 +24,60 @@ extension LyricsProviders {
 }
 
 extension LyricsProviders.QQMusic: _LyricsProvider {
-    
+
     public struct LyricsToken {
         let value: QQResponseSearchResult.Data.Song.Item
     }
-    
+
     public static let service: LyricsProviders.Service? = .qq
-    
-    public func lyricsSearchPublisher(request: LyricsSearchRequest) -> AnyPublisher<LyricsToken, Never> {
+
+    public func searchLyrics(request: LyricsSearchRequest) async throws -> [LyricsToken] {
         let parameter = ["w": request.searchTerm.description]
         let url = URL(string: qqSearchBaseURLString + "?" + parameter.stringFromHttpParameters)!
-        
-        return sharedURLSession.cx.dataTaskPublisher(for: url)
-            .map { $0.data.dropFirst(9).dropLast() }
-            .decode(type: QQResponseSearchResult.self, decoder: JSONDecoder().cx)
-            .map(\.data.song.list)
-            .replaceError(with: [])
-            .flatMap(Publishers.Sequence.init)
-            .map(LyricsToken.init)
-            .eraseToAnyPublisher()
+        var (data, _) = try await sharedURLSession.data(from: url)
+        data = data.dropFirst(9).dropLast(1)
+        let result = try JSONDecoder().decode(QQResponseSearchResult.self, from: data)
+        return result.data.song.list.map(LyricsToken.init)
     }
-    
-    public func lyricsFetchPublisher(token: LyricsToken) -> AnyPublisher<Lyrics, Never> {
+
+    public func fetchLyrics(token: LyricsToken) async throws -> Lyrics? {
         let token = token.value
         let parameter: [String: Any] = [
             "songmid": token.songmid,
-            "g_tk": 5381
+            "g_tk": 5381,
         ]
         let url = URL(string: qqLyricsBaseURLString + "?" + parameter.stringFromHttpParameters)!
         var req = URLRequest(url: url)
         req.setValue("y.qq.com/portal/player.html", forHTTPHeaderField: "Referer")
-        return sharedURLSession.cx.dataTaskPublisher(for: req)
-            .compactMap {
-                let data = $0.data.dropFirst(18).dropLast()
-                guard let model = try? JSONDecoder().decode(QQResponseSingleLyrics.self, from: data),
-                    let lrcContent = model.lyricString,
-                    let lrc = Lyrics(lrcContent) else {
-                        return nil
-                }
-                if let transLrcContent = model.transString,
-                    let transLrc = Lyrics(transLrcContent) {
-                    lrc.merge(translation: transLrc)
-                }
-                
-                lrc.idTags[.title] = token.songname
-                lrc.idTags[.artist] = token.singer.first?.name
-                lrc.idTags[.album] = token.albumname
-                
-                lrc.length = Double(token.interval)
-                lrc.metadata.serviceToken = "\(token.songmid)"
-                if let id = Int(token.songmid) {
-                    lrc.metadata.artworkURL = URL(string: "http://imgcache.qq.com/music/photo/album/\(id % 100)/\(id).jpg")
-                }
-                
-                // remove their kana tag. we don't need it.
-                lrc.idTags.removeValue(forKey: .qqMusicKana)
-                
-                return lrc
-            }.ignoreError()
-            .eraseToAnyPublisher()
+        var (data, _) = try await sharedURLSession.data(for: req)
+        data = data.dropFirst(18).dropLast()
+        guard
+            let model = try? JSONDecoder().decode(QQResponseSingleLyrics.self, from: data),
+            let lrcContent = model.lyricString,
+            let lrc = Lyrics(lrcContent)
+        else {
+            return nil
+        }
+        if let transLrcContent = model.transString,
+            let transLrc = Lyrics(transLrcContent)
+        {
+            lrc.merge(translation: transLrc)
+        }
+
+        lrc.idTags[.title] = token.songname
+        lrc.idTags[.artist] = token.singer.first?.name
+        lrc.idTags[.album] = token.albumname
+
+        lrc.length = Double(token.interval)
+        lrc.metadata.serviceToken = "\(token.songmid)"
+        if let id = Int(token.songmid) {
+            lrc.metadata.artworkURL = URL(
+                string: "http://imgcache.qq.com/music/photo/album/\(id % 100)/\(id).jpg")
+        }
+
+        // remove their kana tag. we don't need it.
+        lrc.idTags.removeValue(forKey: .qqMusicKana)
+
+        return lrc
     }
 }

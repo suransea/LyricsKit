@@ -9,37 +9,50 @@
 
 import Foundation
 import LyricsCore
-import CXShim
 
 public enum LyricsProviders {}
 
 public protocol LyricsProvider {
-    
-    func lyricsPublisher(request: LyricsSearchRequest) -> AnyPublisher<Lyrics, Never>
+    func lyrics(request: LyricsSearchRequest) -> AsyncStream<Lyrics>
 }
 
 public protocol _LyricsProvider: LyricsProvider {
-    
+
     associatedtype LyricsToken
-    
+
     static var service: LyricsProviders.Service? { get }
-    
-    func lyricsSearchPublisher(request: LyricsSearchRequest) -> AnyPublisher<LyricsToken, Never>
-    
-    func lyricsFetchPublisher(token: LyricsToken) -> AnyPublisher<Lyrics, Never>
+
+    func searchLyrics(request: LyricsSearchRequest) async throws -> [LyricsToken]
+
+    func fetchLyrics(token: LyricsToken) async throws -> Lyrics?
 }
 
 extension _LyricsProvider {
-    
-    public func lyricsPublisher(request: LyricsSearchRequest) -> AnyPublisher<Lyrics, Never> {
-        return lyricsSearchPublisher(request: request)
-            .prefix(request.limit)
-            .flatMap(self.lyricsFetchPublisher)
-            .map { lrc in
-                lrc.metadata.searchRequest = request
-                lrc.metadata.service = Self.service
-                // TODO: lrc.metadata.searchIndex
-                return lrc
-            }.eraseToAnyPublisher()
+
+    public func lyrics(request: LyricsSearchRequest) -> AsyncStream<Lyrics> {
+        AsyncStream { continuation in
+            let task = Task {
+                guard let tokens = try? await searchLyrics(request: request).prefix(request.limit)
+                else {
+                    continuation.finish()
+                    return
+                }
+                await withTaskGroup(of: Lyrics?.self) { group in
+                    for token in tokens {
+                        group.addTask {
+                            try? await fetchLyrics(token: token)
+                        }
+                    }
+                    for await lyrics in group {
+                        guard let lyrics else { continue }
+                        lyrics.metadata.searchRequest = request
+                        lyrics.metadata.service = Self.service
+                        continuation.yield(lyrics)
+                    }
+                    continuation.finish()
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 }

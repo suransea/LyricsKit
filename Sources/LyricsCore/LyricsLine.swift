@@ -9,7 +9,7 @@
 
 import Foundation
 
-public struct LyricsLine {
+public struct LyricsLine: Sendable {
     
     public var content: String
     public var position: TimeInterval

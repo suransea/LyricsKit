@@ -62,7 +62,7 @@ extension Lyrics {
 
 extension Lyrics {
     
-    public struct IDTagKey: RawRepresentable, Hashable {
+    public struct IDTagKey: RawRepresentable, Hashable, Sendable {
         
         public var rawValue: String
         

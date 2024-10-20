@@ -9,22 +9,34 @@
 
 import Foundation
 import LyricsCore
-import CXShim
 
 extension LyricsProviders {
-    
+
     public final class Group: LyricsProvider {
-        
-        var providers: [LyricsProvider]
-        
+
+        var providers: [any LyricsProvider]
+
         public init(service: [LyricsProviders.Service] = LyricsProviders.Service.allCases) {
             providers = service.map { $0.create() }
         }
-        
-        public func lyricsPublisher(request: LyricsSearchRequest) -> AnyPublisher<Lyrics, Never> {
-            return providers.cx.publisher
-                .flatMap { $0.lyricsPublisher(request: request) }
-                .eraseToAnyPublisher()
+
+        public func lyrics(request: LyricsSearchRequest) -> AsyncStream<Lyrics> {
+            AsyncStream { [providers] continuation in
+                let task = Task {
+                    await withTaskGroup(of: Void.self) { group in
+                        for provider in providers {
+                            group.addTask {
+                                for await lyrics in provider.lyrics(request: request) {
+                                    continuation.yield(lyrics)
+                                }
+                            }
+                        }
+                        await group.waitForAll()
+                        continuation.finish()
+                    }
+                }
+                continuation.onTermination = { _ in task.cancel() }
+            }
         }
     }
 }

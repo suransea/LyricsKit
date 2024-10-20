@@ -28,7 +28,7 @@ extension Lyrics {
             }
         }
         
-        public struct Key: RawRepresentable, Hashable {
+        public struct Key: RawRepresentable, Hashable, Sendable {
             
             public var rawValue: String
             

@@ -9,8 +9,6 @@
 
 import Foundation
 import LyricsCore
-import CXShim
-import CXExtensions
 
 #if canImport(FoundationNetworking)
 import FoundationNetworking
@@ -26,33 +24,28 @@ extension LyricsProviders {
 }
 
 extension LyricsProviders.Kugou: _LyricsProvider {
-    
+
     public struct LyricsToken {
         let value: KugouResponseSearchResult.Item
     }
-    
+
     public static let service: LyricsProviders.Service? = .kugou
-    
-    public func lyricsSearchPublisher(request: LyricsSearchRequest) -> AnyPublisher<LyricsToken, Never> {
+
+    public func searchLyrics(request: LyricsSearchRequest) async throws -> [LyricsToken] {
         let parameter: [String: Any] = [
             "keyword": request.searchTerm.description,
             "duration": Int(request.duration * 1000),
             "client": "pc",
             "ver": 1,
             "man": "yes",
-            ]
+        ]
         let url = URL(string: kugouSearchBaseURLString + "?" + parameter.stringFromHttpParameters)!
-        return sharedURLSession.cx.dataTaskPublisher(for: url)
-            .map(\.data)
-            .decode(type: KugouResponseSearchResult.self, decoder: JSONDecoder().cx)
-            .map(\.candidates)
-            .replaceError(with: [])
-            .flatMap(Publishers.Sequence.init)
-            .map(LyricsToken.init)
-            .eraseToAnyPublisher()
+        let (data, _) = try await sharedURLSession.data(from: url)
+        let result = try JSONDecoder().decode(KugouResponseSearchResult.self, from: data)
+        return result.candidates.map(LyricsToken.init)
     }
-    
-    public func lyricsFetchPublisher(token: LyricsToken) -> AnyPublisher<Lyrics, Never> {
+
+    public func fetchLyrics(token: LyricsToken) async throws -> Lyrics? {
         let token = token.value
         let parameter: [String: Any] = [
             "id": token.id,
@@ -63,22 +56,19 @@ extension LyricsProviders.Kugou: _LyricsProvider {
             "ver": 1,
         ]
         let url = URL(string: kugouLyricsBaseURLString + "?" + parameter.stringFromHttpParameters)!
-        return sharedURLSession.cx.dataTaskPublisher(for: url)
-            .map(\.data)
-            .decode(type: KugouResponseSingleLyrics.self, decoder: JSONDecoder().cx)
-            .compactMap {
-                guard let lrcContent = decryptKugouKrc($0.content),
-                    let lrc = Lyrics(kugouKrcContent: lrcContent) else {
-                        return nil
-                }
-                lrc.idTags[.title] = token.song
-                lrc.idTags[.artist] = token.singer
-                lrc.idTags[.lrcBy] = "Kugou"
-                
-                lrc.length = Double(token.duration)/1000
-                lrc.metadata.serviceToken = "\(token.id),\(token.accesskey)"
-                return lrc
-            }.ignoreError()
-            .eraseToAnyPublisher()
+        let (data, _) = try await sharedURLSession.data(from: url)
+        let result = try JSONDecoder().decode(KugouResponseSingleLyrics.self, from: data)
+        guard let lrcContent = decryptKugouKrc(result.content),
+            let lrc = Lyrics(kugouKrcContent: lrcContent)
+        else {
+            return nil
+        }
+        lrc.idTags[.title] = token.song
+        lrc.idTags[.artist] = token.singer
+        lrc.idTags[.lrcBy] = "Kugou"
+
+        lrc.length = Double(token.duration) / 1000
+        lrc.metadata.serviceToken = "\(token.id),\(token.accesskey)"
+        return lrc
     }
 }

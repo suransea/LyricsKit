@@ -18,26 +18,15 @@ final class LyricsKitTests: XCTestCase {
         XCTAssertEqual(lrc.lineIndex(at: 0), 8)
     }
     
-    func testSearching() {
+    func testSearching() async {
         let source = LyricsProviders.Group()
-        var searchResultEx: XCTestExpectation? = expectation(description: "search succeed")
         let searchReq = LyricsSearchRequest(searchTerm: .info(title: "Uprising", artist: "Muse"), duration: 305)
-        let token = source.lyricsPublisher(request: searchReq).sink { _ in
-            searchResultEx?.fulfill()
-            searchResultEx = nil
-        }
-        waitForExpectations(timeout: 10)
-        token.cancel()
+        for await _ in source.lyrics(request: searchReq) {}
     }
     
-    func testNetEase() {
-        let searchResultEx = expectation(description: "search succeed")
+    func testNetEase() async {
         let provider = LyricsProviders.NetEase()
-        let publisher = provider.lyricsPublisher(request: .init(searchTerm: .info(title: "One Last You", artist: "光田康典"), duration: 0))
-        let cancelable = publisher.sink { lyrics in
-            searchResultEx.fulfill()
-        }
-        waitForExpectations(timeout: 10)
-        cancelable.cancel()
+        let lyrics = provider.lyrics(request: .init(searchTerm: .info(title: "One Last You", artist: "光田康典"), duration: 0))
+        for await _ in lyrics {}
     }
 }

@@ -9,8 +9,6 @@
 
 import Foundation
 import LyricsCore
-import CXShim
-import CXExtensions
 
 #if canImport(FoundationNetworking)
 import FoundationNetworking
@@ -25,15 +23,15 @@ extension LyricsProviders {
 }
 
 extension LyricsProviders.Xiami: _LyricsProvider {
-    
+
     public struct LyricsToken {
         let value: XiamiResponseSearchResult.Data.Song
     }
-    
+
     public static let service: LyricsProviders.Service? = nil
-    
-    public func lyricsSearchPublisher(request: LyricsSearchRequest) -> AnyPublisher<LyricsToken, Never> {
-        let parameter: [String : Any] = [
+
+    public func searchLyrics(request: LyricsSearchRequest) async throws -> [LyricsToken] {
+        let parameter: [String: Any] = [
             "key": request.searchTerm.description,
             "limit": 10,
             "r": "search/songs",
@@ -44,35 +42,29 @@ extension LyricsProviders.Xiami: _LyricsProvider {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("http://h.xiami.com/", forHTTPHeaderField: "Referer")
-        return sharedURLSession.cx.dataTaskPublisher(for: req)
-            .map(\.data)
-            .decode(type: XiamiResponseSearchResult.self, decoder: JSONDecoder().cx)
-            .map(\.data.songs)
-            .replaceError(with: [])
-            .flatMap(Publishers.Sequence.init)
-            .map(LyricsToken.init)
-            .eraseToAnyPublisher()
+        let (data, _) = try await sharedURLSession.data(for: req)
+        let result = try JSONDecoder().decode(XiamiResponseSearchResult.self, from: data)
+        return result.data.songs.map(LyricsToken.init)
     }
-    
-    public func lyricsFetchPublisher(token: LyricsToken) -> AnyPublisher<Lyrics, Never> {
+
+    public func fetchLyrics(token: LyricsToken) async throws -> Lyrics? {
         guard let lrcURLStr = token.value.lyric,
-            let lrcURL = URL(string: lrcURLStr) else {
-                return Empty().eraseToAnyPublisher()
+            let lrcURL = URL(string: lrcURLStr)
+        else {
+            return nil
         }
-        return sharedURLSession.cx.dataTaskPublisher(for: lrcURL)
-            .compactMap {
-                guard let lrcStr = String(data: $0.data, encoding: .utf8),
-                    let lrc = Lyrics(ttpodXtrcContent:lrcStr) else {
-                        return nil
-                }
-                lrc.idTags[.title] = token.value.song_name
-                lrc.idTags[.artist] = token.value.artist_name
-                
-                lrc.metadata.remoteURL = lrcURL
-                lrc.metadata.artworkURL = token.value.album_logo
-                lrc.metadata.serviceToken = token.value.lyric
-                return lrc
-            }.ignoreError()
-            .eraseToAnyPublisher()
+        let (data, _) = try await sharedURLSession.data(from: lrcURL)
+        guard let lrcStr = String(data: data, encoding: .utf8),
+            let lrc = Lyrics(ttpodXtrcContent: lrcStr)
+        else {
+            return nil
+        }
+        lrc.idTags[.title] = token.value.song_name
+        lrc.idTags[.artist] = token.value.artist_name
+
+        lrc.metadata.remoteURL = lrcURL
+        lrc.metadata.artworkURL = token.value.album_logo
+        lrc.metadata.serviceToken = token.value.lyric
+        return lrc
     }
 }

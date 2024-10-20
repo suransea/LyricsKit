@@ -22,7 +22,7 @@ extension LyricsProviders {
 
 extension LyricsProviders.Service {
     
-    func create() -> LyricsProvider {
+    func create() -> any LyricsProvider {
         switch self {
         case .netease:  return LyricsProviders.NetEase()
         case .qq:       return LyricsProviders.QQMusic()

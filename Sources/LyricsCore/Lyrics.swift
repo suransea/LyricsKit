@@ -9,9 +9,9 @@
 
 import Foundation
 
-final public class Lyrics {
+final public class Lyrics: @unchecked Sendable {
     
-    private var lines: [LyricsLine] = []
+    public var lines: [LyricsLine] = []
     public var idTags: [IDTagKey: String] = [:]
     public var metadata: Metadata = Metadata()
     

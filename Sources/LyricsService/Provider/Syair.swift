@@ -9,8 +9,6 @@
 
 import Foundation
 import LyricsCore
-import CXShim
-import CXExtensions
 
 #if canImport(Darwin)
 
@@ -24,10 +22,11 @@ extension LyricsProviders {
 }
 
 extension LyricsProviders.Syair: _LyricsProvider {
-    
+    public typealias LyricsToken = String
+
     public static let service: LyricsProviders.Service? = .syair
-    
-    public func lyricsSearchPublisher(request: LyricsSearchRequest) -> AnyPublisher<String, Never> {
+
+    public func searchLyrics(request: LyricsSearchRequest) async throws -> [LyricsToken] {
         var parameter: [String: Any] = ["page": 1]
         switch request.searchTerm {
         case let .info(title: title, artist: artist):
@@ -37,35 +36,29 @@ extension LyricsProviders.Syair: _LyricsProvider {
             parameter["q"] = keyword
         }
         let url = URL(string: syairSearchBaseURLString + "?" + parameter.stringFromHttpParameters)!
-        return sharedURLSession.cx.dataTaskPublisher(for: url)
-            .map {
-                return String(data: $0.data, encoding: .utf8).map {
-                    return syairSearchResultRegex.matches(in: $0).compactMap { ($0[1]?.string) }
-                } ?? []
-            }
-            .replaceError(with: [])
-            .flatMap(Publishers.Sequence.init)
-            .eraseToAnyPublisher()
+        let (data, _) = try await sharedURLSession.data(for: URLRequest(url: url))
+        guard let result = String(data: data, encoding: .utf8) else {
+            return []
+        }
+        return syairSearchResultRegex.matches(in: result).compactMap { $0[1]?.string }
     }
-    
-    public func lyricsFetchPublisher(token: String) -> AnyPublisher<Lyrics, Never> {
+
+    public func fetchLyrics(token: LyricsToken) async throws -> Lyrics? {
         guard let url = URL(string: token, relativeTo: syairLyricsBaseURL) else {
-            return Empty().eraseToAnyPublisher()
+            return nil
         }
         var req = URLRequest(url: url)
         req.addValue("https://syair.info/", forHTTPHeaderField: "Referer")
-        return sharedURLSession.cx.dataTaskPublisher(for: req)
-            .compactMap {
-                guard let str = String(data: $0.data, encoding: .utf8),
-                    let lrcData = syairLyricsContentRegex.firstMatch(in: str)?.captures[1]?.string.data(using: .utf8),
-                    let lrcStr = try? NSAttributedString(data: lrcData, options: [.documentType: NSAttributedString.DocumentType.html], documentAttributes: nil).string,
-                    let lrc = Lyrics(lrcStr) else {
-                        return nil
-                }
-                lrc.metadata.serviceToken = token
-                return lrc
-            }.ignoreError()
-            .eraseToAnyPublisher()
+        let (data, _) = try await sharedURLSession.data(for: req)
+        guard let str = String(data: data, encoding: .utf8),
+            let lrcData = syairLyricsContentRegex.firstMatch(in: str)?.captures[1]?.string.data(using: .utf8),
+            let lrcStr = try? NSAttributedString(data: lrcData, options: [.documentType: NSAttributedString.DocumentType.html], documentAttributes: nil).string,
+            let lrc = Lyrics(lrcStr) 
+        else {
+            return nil
+        }
+        lrc.metadata.serviceToken = token
+        return lrc
     }
 }
 

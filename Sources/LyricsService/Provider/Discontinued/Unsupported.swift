@@ -9,7 +9,6 @@
 
 import Foundation
 import LyricsCore
-import CXShim
 
 extension LyricsProviders {
     public final class Unsupported {
@@ -18,8 +17,10 @@ extension LyricsProviders {
 }
 
 extension LyricsProviders.Unsupported: LyricsProvider {
-    
-    public func lyricsPublisher(request: LyricsSearchRequest) -> AnyPublisher<Lyrics, Never> {
-        return Empty<Lyrics, Never>().eraseToAnyPublisher()
+
+    public func lyrics(request: LyricsSearchRequest) -> AsyncStream<Lyrics> {
+        AsyncStream { continuation in
+            continuation.finish()
+        }
     }
 }

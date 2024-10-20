@@ -9,15 +9,13 @@
 
 import Foundation
 import LyricsCore
-import CXShim
-import CXExtensions
 
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
 
 private let gecimiLyricsBaseURL = URL(string: "http://gecimi.com/api/lyric")!
-private let gecimiCoverBaseURL = URL(string:"http://gecimi.com/api/cover")!
+private let gecimiCoverBaseURL = URL(string: "http://gecimi.com/api/cover")!
 
 extension LyricsProviders {
     public final class Gecimi {
@@ -26,46 +24,41 @@ extension LyricsProviders {
 }
 
 extension LyricsProviders.Gecimi: _LyricsProvider {
-    
+
     public struct LyricsToken {
         let value: GecimiResponseSearchResult.Result
     }
-    
+
     public static let service: LyricsProviders.Service? = .gecimi
-    
-    public func lyricsSearchPublisher(request: LyricsSearchRequest) -> AnyPublisher<LyricsToken, Never> {
+
+    public func searchLyrics(request: LyricsSearchRequest) async throws -> [LyricsToken] {
         guard case let .info(title, artist) = request.searchTerm else {
             // cannot search by keyword
-            return Empty().eraseToAnyPublisher()
+            return []
         }
         let encodedTitle = title.addingPercentEncoding(withAllowedCharacters: .uriComponentAllowed)!
-        let encodedArtist = artist.addingPercentEncoding(withAllowedCharacters: .uriComponentAllowed)!
-        
+        let encodedArtist = artist.addingPercentEncoding(
+            withAllowedCharacters: .uriComponentAllowed)!
+
         let url = gecimiLyricsBaseURL.appendingPathComponent("\(encodedTitle)/\(encodedArtist)")
         let req = URLRequest(url: url)
-        
-        return sharedURLSession.cx.dataTaskPublisher(for: req)
-            .map(\.data)
-            .decode(type: GecimiResponseSearchResult.self, decoder: JSONDecoder().cx)
-            .map(\.result)
-            .replaceError(with: [])
-            .flatMap(Publishers.Sequence.init)
-            .map(LyricsToken.init)
-            .eraseToAnyPublisher()
+
+        let (data, _) = try await sharedURLSession.data(for: req)
+        let result = try JSONDecoder().decode(GecimiResponseSearchResult.self, from: data)
+        return result.result.map(LyricsToken.init)
     }
-    
-    public func lyricsFetchPublisher(token: LyricsToken) -> AnyPublisher<Lyrics, Never> {
+
+    public func fetchLyrics(token: LyricsToken) async throws -> Lyrics? {
         let token = token.value
-        return sharedURLSession.cx.dataTaskPublisher(for: token.lrc)
-            .compactMap {
-                guard let lrcContent = String(data: $0.data, encoding: .utf8),
-                    let lrc = Lyrics(lrcContent) else {
-                        return nil
-                }
-                lrc.metadata.remoteURL = token.lrc
-                lrc.metadata.serviceToken = "\(token.aid),\(token.lrc)"
-                return lrc
-            }.ignoreError()
-            .eraseToAnyPublisher()
+        let req = URLRequest(url: token.lrc)
+        let (data, _) = try await sharedURLSession.data(for: req)
+        guard let lrcContent = String(data: data, encoding: .utf8),
+            let lrc = Lyrics(lrcContent)
+        else {
+            return nil
+        }
+        lrc.metadata.remoteURL = token.lrc
+        lrc.metadata.serviceToken = "\(token.aid),\(token.lrc)"
+        return lrc
     }
 }
